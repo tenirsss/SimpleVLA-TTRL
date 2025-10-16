@@ -1,0 +1,28 @@
+hydra:
+  searchpath:
+    - file://verl/trainer/config
+
+defaults:
+  - ppo_trainer
+  - _self_
+
+# VLA-TTRL Configuration
+# Adapts TTRL methodology for Vision-Language-Action models
+vla_ttrl:
+  # Whether to enable VLA-TTRL (Test-Time RL for VLA tasks)
+  enable: false
+
+  # Number of rollouts per prompt for training
+  n_samples_per_prompt: ${actor_rollout_ref.rollout.n}
+
+  # Number of rollouts per prompt for majority voting
+  n_votes_per_prompt: ${actor_rollout_ref.rollout.n}
+  
+  # Minimum confidence ratio for majority voting to be trusted
+  min_confidence_ratio: 0.5
+  
+  # Whether to use original environment rewards as fallback when confidence is low
+  use_env_fallback: true
+  
+  # Whether to log detailed VLA-TTRL metrics
+  log_detailed_metrics: true
