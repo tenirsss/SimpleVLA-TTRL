@@ -12,11 +12,17 @@ vla_ttrl:
   # Whether to enable VLA-TTRL (Test-Time RL for VLA tasks)
   enable: false
 
-  # Number of rollouts per prompt for training
-  n_samples_per_prompt: ${actor_rollout_ref.rollout.n}
+  # Number of rollouts per prompt for majority voting (投票阶段)
+  # 每个prompt生成5条轨迹进行投票
+  n_votes_per_prompt: 5
 
-  # Number of rollouts per prompt for majority voting
-  n_votes_per_prompt: ${actor_rollout_ref.rollout.n}
+  # Number of rollouts per prompt for training (训练阶段)
+  # 从5条投票轨迹中选择的数量用于实际PPO训练
+  n_samples_per_prompt: 1
+  
+  # Batch size for rollout generation (rollout阶段的batch size)
+  # 控制每次处理多少个prompts，建议设置为合适的小一些的数量
+  rollout_batch_size: 32
   
   # Minimum confidence ratio for majority voting to be trusted
   min_confidence_ratio: 0.5

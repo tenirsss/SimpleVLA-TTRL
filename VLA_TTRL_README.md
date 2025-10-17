@@ -1,3 +1,9 @@
+---
+noteId: "3c3bac30aa7311f086dff72d707ba71f"
+tags: []
+
+---
+
 # VLA-TTRL: Test-Time Reinforcement Learning for Vision-Language-Action Models
 
 这个文档描述了如何将TTRL (Test-Time Reinforcement Learning) 的思想迁移到SimpleVLA-RL项目中，用于VLA (Vision-Language-Action) 模型的强化学习训练。

@@ -17,7 +17,6 @@ VLA-TTRL Utils: Adapting TTRL methodology for Vision-Language-Action models.
 This module implements majority voting for VLA task completion outcomes.
 """
 
-import torch
 import numpy as np
 from collections import Counter
 from typing import List, Dict, Any, Tuple
@@ -290,6 +289,78 @@ def compute_vla_ttrl_metrics(batch, n: int) -> Dict[str, float]:
     return vla_ttrl_metrics
 
 
+def process_vla_rollout_batch(batch, rollout_outputs, n_votes_per_prompt: int, n_samples_per_prompt: int):
+    """
+    Process VLA rollout batch with proper batch size handling.
+    
+    This handles the case where:
+    - Input: BATCH_SIZE prompts (e.g., 192)  
+    - Generation: Each prompt → n_votes_per_prompt rollouts (e.g., 3)
+    - Total: BATCH_SIZE × n_votes_per_prompt rollouts (e.g., 192 × 3 = 576)
+    - Selection: Keep n_samples_per_prompt per prompt for training
+    
+    Args:
+        batch: Input batch with BATCH_SIZE prompts
+        rollout_outputs: List of rollout outputs (BATCH_SIZE × n_votes_per_prompt)
+        n_votes_per_prompt: Number of rollouts per prompt for voting
+        n_samples_per_prompt: Number of rollouts per prompt for training
+        
+    Returns:
+        Tuple of (processed_batch, selected_rollouts, vla_ttrl_info)
+    """
+    batch_size = len(batch)
+    total_rollouts = len(rollout_outputs)
+    expected_rollouts = batch_size * n_votes_per_prompt
+    
+    assert total_rollouts == expected_rollouts, (
+        f"Rollout count mismatch: expected {expected_rollouts} "
+        f"({batch_size} prompts × {n_votes_per_prompt} votes), got {total_rollouts}"
+    )
+    
+    print(f"VLA-TTRL Batch Processing:")
+    print(f"  Input prompts: {batch_size}")
+    print(f"  Votes per prompt: {n_votes_per_prompt}")
+    print(f"  Total rollouts: {total_rollouts}")
+    print(f"  Samples per prompt for training: {n_samples_per_prompt}")
+    
+    # Extract task outcomes from all rollouts
+    task_outcomes = []
+    for output_item in rollout_outputs:
+        # Extract task success - handle different possible formats
+        task_success = False
+        if hasattr(output_item, 'batch'):
+            acc_field = output_item.batch.get('acc', None)
+            if acc_field is not None:
+                if hasattr(acc_field, '__getitem__') and len(acc_field) > 0:
+                    task_success = acc_field[0]
+                    if hasattr(task_success, 'item'):
+                        task_success = task_success.item()
+        
+        task_outcomes.append(bool(task_success))
+    
+    # Apply majority voting to determine pseudo ground truth
+    processed_batch = apply_vla_ttrl_gt(batch, task_outcomes, n_votes_per_prompt)
+    
+    # Select rollouts for training
+    selected_rollouts = select_top_k_per_prompt_vla(rollout_outputs, n_votes_per_prompt, n_samples_per_prompt)
+    
+    # Compute voting statistics
+    majority_outcomes, confidence_ratios = _batch_vla_majority_vote(task_outcomes, n_votes_per_prompt)
+    
+    vla_ttrl_info = {
+        'batch_size': batch_size,
+        'n_votes_per_prompt': n_votes_per_prompt,
+        'n_samples_per_prompt': n_samples_per_prompt,
+        'total_rollouts': total_rollouts,
+        'selected_rollouts': len(selected_rollouts),
+        'avg_confidence': np.mean(confidence_ratios),
+        'majority_success_rate': np.mean(majority_outcomes),
+        'original_success_rate': np.mean(task_outcomes),
+    }
+    
+    return processed_batch, selected_rollouts, vla_ttrl_info
+
+
 def select_top_k_per_prompt_vla(rollout_outputs, n_votes: int, n_samples: int):
     """
     Select top-k rollouts per prompt for VLA tasks.
@@ -306,7 +377,7 @@ def select_top_k_per_prompt_vla(rollout_outputs, n_votes: int, n_samples: int):
     if n_votes <= n_samples:
         return rollout_outputs
     
-    assert len(rollout_outputs) % n_votes == 0
+    assert len(rollout_outputs) % n_votes == 0, f"Rollout count {len(rollout_outputs)} not divisible by {n_votes}"
     n_prompts = len(rollout_outputs) // n_votes
     
     selected_outputs = []

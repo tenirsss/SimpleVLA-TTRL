@@ -537,6 +537,8 @@ class RayTrainer(object):
                         newbatch.non_tensor_batch['uid'] = np.array([str(uuid.uuid4()) for _ in range(len(newbatch.batch))],
                                                              dtype=object)
 
+                        # Build batch list - will be updated after VLA-TTRL processing if needed
+                        original_n_samples = n_samples
                         batch_lst = sum([[newbatch[i:i + 1] for _ in range(n_samples)] for i in range(len(newbatch))],
                                         [])
 
@@ -546,7 +548,48 @@ class RayTrainer(object):
                             'pad_token_id': self.tokenizer.pad_token_id,
                         }
                         
-                        gen_batch_output = self.actor_rollout_wg.generate_sequences(prompts=gen_batch)
+                        # VLA-TTRL Integration: Check if VLA-TTRL is enabled
+                        if self.config.get("vla_ttrl", {}).get("enable", False):
+                            try:
+                                from verl.trainer.ppo.vla_ttrl_utils import process_vla_rollout_batch
+                                
+                                # Generate multiple rollouts for majority voting
+                                # Set meta_info to generate n_votes_per_prompt rollouts per prompt
+                                gen_batch.meta_info["n_samples"] = self.config.vla_ttrl.n_votes_per_prompt
+                                gen_batch_output = self.actor_rollout_wg.generate_sequences(prompts=gen_batch)
+                                
+                                # Process VLA-TTRL batch with proper batch size handling
+                                newbatch, gen_batch_output, vla_ttrl_info = process_vla_rollout_batch(
+                                    newbatch, 
+                                    gen_batch_output,
+                                    self.config.vla_ttrl.n_votes_per_prompt,
+                                    self.config.vla_ttrl.n_samples_per_prompt
+                                )
+                                
+                                # Update n_samples to match selected rollouts
+                                n_samples = self.config.vla_ttrl.n_samples_per_prompt
+                                
+                                # Rebuild batch_lst with new n_samples
+                                batch_lst = sum([[newbatch[i:i + 1] for _ in range(n_samples)] for i in range(len(newbatch))],
+                                               [])
+                                
+                                # Log VLA-TTRL processing info
+                                print(f"VLA-TTRL Processing Complete:")
+                                for key, value in vla_ttrl_info.items():
+                                    if isinstance(value, float):
+                                        print(f"  {key}: {value:.4f}")
+                                    else:
+                                        print(f"  {key}: {value}")
+                                
+                            except ImportError as e:
+                                print(f"Warning: VLA-TTRL enabled but import failed ({e}), falling back to standard generation")
+                                gen_batch_output = self.actor_rollout_wg.generate_sequences(prompts=gen_batch)
+                            except Exception as e:
+                                print(f"Warning: VLA-TTRL processing failed ({e}), falling back to standard generation")
+                                gen_batch_output = self.actor_rollout_wg.generate_sequences(prompts=gen_batch)
+                        else:
+                            # Standard generation
+                            gen_batch_output = self.actor_rollout_wg.generate_sequences(prompts=gen_batch)
                         
                         roll_batch = DataProto.concat(batch_lst)
                         #roll_batch.pop(batch_keys=['input_ids', 'attention_mask', 'position_ids'])
@@ -568,6 +611,28 @@ class RayTrainer(object):
                             metrics['train_verify_score_wo_format/' + k].append(v)    
                             
                     metrics['timing/verify'] += timer.last
+                    
+                    # VLA-TTRL: Compute metrics if enabled
+                    if self.config.get("vla_ttrl", {}).get("enable", False):
+                        try:
+                            from verl.trainer.ppo.vla_ttrl_utils import apply_vla_original_gt, compute_vla_ttrl_metrics
+                            
+                            # Store original rewards for comparison
+                            if "token_level_scores_original" not in roll_batch.batch:
+                                # Temporarily restore original ground truth to compute baseline rewards
+                                roll_batch_original = apply_vla_original_gt(roll_batch)
+                                scores_tensor_original, _, _, _ = self.reward_fn.verify(roll_batch_original)
+                                roll_batch.batch['token_level_scores_original'] = scores_tensor_original
+                            
+                            # Compute VLA-TTRL metrics
+                            vla_ttrl_metrics = compute_vla_ttrl_metrics(roll_batch, self.config.vla_ttrl.n_samples_per_prompt)
+                            
+                            # Add VLA-TTRL metrics to logging
+                            for key, value in vla_ttrl_metrics.items():
+                                metrics[f'vla_ttrl/{key}'].append(value)
+                                
+                        except (ImportError, AttributeError, KeyError) as e:
+                            print(f"Warning: VLA-TTRL metrics computation failed: {e}")
                     
                     # do accuracy filtering and score logging
                     with Timer(name='acc&trunc_filter', text="{name}: {seconds:.1f} seconds") as timer:
