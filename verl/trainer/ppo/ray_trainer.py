@@ -554,14 +554,30 @@ class RayTrainer(object):
                                 from verl.trainer.ppo.vla_ttrl_utils import process_vla_rollout_batch
                                 
                                 # Generate multiple rollouts for majority voting
-                                # Set meta_info to generate n_votes_per_prompt rollouts per prompt
-                                gen_batch.meta_info["n_samples"] = self.config.vla_ttrl.n_votes_per_prompt
-                                gen_batch_output = self.actor_rollout_wg.generate_sequences(prompts=gen_batch)
+                                # Use multiple sequential calls to avoid batch size expansion issues
+                                all_rollouts = []
+                                n_votes = self.config.vla_ttrl.n_votes_per_prompt
+                                
+                                # Process in smaller chunks to avoid padding errors
+                                vla_rollout_batch_size = self.config.vla_ttrl.get("rollout_batch_size", 4)
+                                prompts_per_chunk = min(len(newbatch), vla_rollout_batch_size)
+                                
+                                for vote_idx in range(n_votes):
+                                    for chunk_start in range(0, len(newbatch), prompts_per_chunk):
+                                        chunk_end = min(chunk_start + prompts_per_chunk, len(newbatch))
+                                        chunk_batch = gen_batch[chunk_start:chunk_end]
+                                        
+                                        # Generate one rollout per prompt in this chunk
+                                        chunk_batch.meta_info["n_samples"] = 1
+                                        chunk_output = self.actor_rollout_wg.generate_sequences(prompts=chunk_batch)
+                                        all_rollouts.extend(chunk_output)
+                                
+                                print(f"VLA-TTRL Generated {len(all_rollouts)} rollouts for {len(newbatch)} prompts ({n_votes} votes each)")
                                 
                                 # Process VLA-TTRL batch with proper batch size handling
                                 newbatch, gen_batch_output, vla_ttrl_info = process_vla_rollout_batch(
                                     newbatch, 
-                                    gen_batch_output,
+                                    all_rollouts,
                                     self.config.vla_ttrl.n_votes_per_prompt,
                                     self.config.vla_ttrl.n_samples_per_prompt
                                 )

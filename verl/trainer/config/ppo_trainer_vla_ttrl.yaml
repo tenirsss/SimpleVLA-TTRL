@@ -22,7 +22,9 @@ vla_ttrl:
   
   # Batch size for rollout generation (rollout阶段的batch size)
   # 控制每次处理多少个prompts，建议设置为合适的小一些的数量
-  rollout_batch_size: 32
+  # 最终扩展后的batch size = rollout_batch_size × n_votes_per_prompt
+  # 例如：8 × 5 = 40，这样可以避免 padding 错误
+  rollout_batch_size: 8
   
   # Minimum confidence ratio for majority voting to be trusted
   min_confidence_ratio: 0.5

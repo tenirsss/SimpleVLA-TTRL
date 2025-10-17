@@ -1,6 +1,6 @@
 #!/bin/bash
-# VLA-TTRL训练脚本 - 中等batch版
-# 配置: 64个prompts × 5条投票轨迹 = 320条轨迹候选
+# VLA-TTRL训练脚本 - 安全版本
+# 配置: 4个prompts × 5条投票轨迹 = 20条轨迹候选 (最小batch避免padding错误)
 
 set -x
 
@@ -13,8 +13,8 @@ export CUDA_LAUNCH_BLOCKING=1
 export TORCH_USE_CUDA_DSA=1
 export ROBOT_PLATFORM=LIBERO
 
-PROJECT_NAME='SimpleVLA-TTRL-Medium'
-EXPERIMENT_NAME='vla_ttrl_64prompts_5votes' 
+PROJECT_NAME='SimpleVLA-TTRL-Safe'
+EXPERIMENT_NAME='vla_ttrl_4prompts_5votes_safe' 
 SFT_MODEL_PATH="/inspire/hdd/project/realtimedecisionmaking/yishenghong-CZXS25230064/sychen/vla_models/openvla-oft-traj1-libero_10"
 CKPT_PATH="/inspire/hdd/project/realtimedecisionmaking/yishenghong-CZXS25230064/sychen/SimpleVLA-TTRL/checkpoint"
 DATASET_NAME="libero_10"
@@ -107,7 +107,7 @@ HYDRA_FULL_ERROR=1 python -u -m verl.trainer.main_ppo \
     +vla_ttrl.enable=True \
     +vla_ttrl.n_votes_per_prompt=5 \
     +vla_ttrl.n_samples_per_prompt=1 \
-    +vla_ttrl.rollout_batch_size=8 \
+    +vla_ttrl.rollout_batch_size=4 \
     +vla_ttrl.min_confidence_ratio=0.6 \
     +vla_ttrl.use_env_fallback=True \
     +vla_ttrl.log_detailed_metrics=True
